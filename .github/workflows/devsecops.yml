@@ -13,9 +13,9 @@ jobs:
       - name: Clonar repositorio
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # ¡IMPORTANTE para SonarCloud!
+          fetch-depth: 0
 
-      - name: SAST - Análisis con SonarCloud
+      - name: SAST - SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -23,7 +23,7 @@ jobs:
         with:
           args: >
             -Dsonar.organization=sweat8
-            -Dsonar.projectKey=devsecops-laboratorio
+            -Dsonar.projectKey=sweat8_devsecops-laboratorio
             -Dsonar.sources=.
             -Dsonar.qualitygate.wait=true
       # # ---------- SCA ----------
