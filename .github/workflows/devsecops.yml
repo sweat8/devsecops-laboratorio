@@ -23,7 +23,7 @@ jobs:
         with:
           args: >
             -Dsonar.organization=sweat8
-            -Dsonar.projectKey=sweat8_devsecops-laboratorio
+            -Dsonar.projectKey=devsecops-laboratorio
             -Dsonar.sources=.
             -Dsonar.qualitygate.wait=true
       # # ---------- SCA ----------
