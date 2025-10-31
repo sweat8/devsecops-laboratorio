@@ -1,20 +1,20 @@
-name: DevSecOps Pipeline
+name: DevSecOps Pipeline - SonarCloud Focus
 
 on:
   push:
     branches:
       - feature/devsecops-pipeline
-  pull_request:
 
 jobs:
-  build-and-secure:
+  sonarcloud-sast:
     runs-on: ubuntu-latest
 
     steps:
       - name: Clonar repositorio
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # ¡IMPORTANTE para SonarCloud!
 
-      # ---------- SAST ----------
       - name: SAST - Análisis con SonarCloud
         uses: SonarSource/sonarcloud-github-action@master
         env:
@@ -26,7 +26,6 @@ jobs:
             -Dsonar.projectKey=sweat8_devsecops-laboratorio
             -Dsonar.sources=.
             -Dsonar.qualitygate.wait=true
-
       # # ---------- SCA ----------
       # - name: SCA - Dependency Check
       #   uses: dependency-check/Dependency-Check_Action@main
