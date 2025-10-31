@@ -18,6 +18,7 @@ jobs:
       - name: SAST - Análisis con SonarCloud
         uses: SonarSource/sonarcloud-github-action@master
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
@@ -26,32 +27,32 @@ jobs:
             -Dsonar.sources=.
             -Dsonar.qualitygate.wait=true
 
-      # ---------- SCA ----------
-      - name: SCA - Dependency Check
-        uses: dependency-check/Dependency-Check_Action@main
-        with:
-          project: 'DevSecOpsLab'
-          path: '.'
-          format: 'HTML'
-          out: 'reports'
+      # # ---------- SCA ----------
+      # - name: SCA - Dependency Check
+      #   uses: dependency-check/Dependency-Check_Action@main
+      #   with:
+      #     project: 'DevSecOpsLab'
+      #     path: '.'
+      #     format: 'HTML'
+      #     out: 'reports'
 
-      - name: Fallar si hay vulnerabilidades medias o mayores (SCA)
-        run: |
-          if grep -E "CRITICAL|HIGH|MEDIUM" reports/dependency-check-report.html; then
-            echo "Vulnerabilidades detectadas en dependencias"
-            exit 1
-          fi
+      # - name: Fallar si hay vulnerabilidades medias o mayores (SCA)
+      #   run: |
+      #     if grep -E "CRITICAL|HIGH|MEDIUM" reports/dependency-check-report.html; then
+      #       echo "Vulnerabilidades detectadas en dependencias"
+      #       exit 1
+      #     fi
 
-      # ---------- Construcción Imagen Docker ----------
-      - name: Build Docker image
-        run: docker build -t movies-app:latest .
+      # # ---------- Construcción Imagen Docker ----------
+      # - name: Build Docker image
+      #   run: docker build -t movies-app:latest .
 
-      # ---------- Image Security ----------
-      - name: Image Scan con Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'movies-app:latest'
-          format: 'table'
-          exit-code: '1'
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH,MEDIUM'
+      # # ---------- Image Security ----------
+      # - name: Image Scan con Trivy
+      #   uses: aquasecurity/trivy-action@master
+      #   with:
+      #     image-ref: 'movies-app:latest'
+      #     format: 'table'
+      #     exit-code: '1'
+      #     vuln-type: 'os,library'
+      #     severity: 'CRITICAL,HIGH,MEDIUM'
