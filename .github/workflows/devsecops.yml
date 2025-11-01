@@ -4,12 +4,9 @@ on:
   push:
     branches:
       - feature/devsecops-pipeline
-  pull_request:
-    branches:
-      - main
 
 permissions:
-  contents: read
+  contents: read                     
 
 jobs:
   sonarcloud-sast:
@@ -21,7 +18,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Debug SonarCloud project visibility
+        run: |
+          echo ">> Checking project access with SONAR_TOKEN..."
+          curl -s -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/projects/search?projects=sweat8_devsecops-laboratorio"
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.organization=sweat8
+            -Dsonar.projectKey=sweat8_devsecops-laboratorio
