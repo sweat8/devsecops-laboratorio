@@ -1,35 +1,23 @@
-name: DevSecOps Pipeline - SonarCloud Focus
+name: DevSecOps Pipeline
 
 on:
   push:
-    branches:
-      - main
-      - feature/devsecops-pipeline
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
-  ci-security:
+  sast:
+    name: SAST - SonarCloud
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Validate Sonar token access
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          set -e
-          curl -sf -u "${SONAR_TOKEN}:" "https://sonarcloud.io/api/projects/search?organization=sweat8&projects=sweat8_devsecops-laboratorio" >/dev/null
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: SonarCloud Scan (no wait)
+      - name: SonarCloud Scan (branches)
+        if: github.ref != 'refs/heads/main'
         uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -38,52 +26,83 @@ jobs:
             -Dsonar.host.url=https://sonarcloud.io
             -Dsonar.organization=sweat8
             -Dsonar.projectKey=sweat8_devsecops-laboratorio
-            -Dsonar.qualitygate.wait=false
 
-      - name: Wait CE and check Quality Gate (main only)
-        if: github.ref_name == 'main'
+      - name: SonarCloud Scan + Quality Gate (main)
+        if: github.ref == 'refs/heads/main'
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.organization=sweat8
+            -Dsonar.projectKey=sweat8_devsecops-laboratorio
+            -Dsonar.qualitygate.wait=true
+
+  sca:
+    name: SCA - Dependency Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: OWASP Dependency-Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'DevSecOpsLab'
+          path: '.'
+          format: 'HTML'
+          out: 'reports'
+
+      - name: Fail if vulnerabilities >= MEDIUM
         run: |
-          set -Eeuo pipefail
-          RT=".scannerwork/report-task.txt"
-          if [ ! -f "$RT" ]; then
-            echo "report-task.txt not found"
+          if grep -Ei 'CRITICAL|HIGH|MEDIUM' reports/dependency-check-report.html; then
+            echo 'Dependency vulnerabilities found (>= MEDIUM).'
             exit 1
+          else
+            echo 'No dependency vulnerabilities >= MEDIUM'
           fi
 
-          CE_TASK_ID=$(grep '^ceTaskId=' "$RT" | cut -d= -f2)
+      - name: Upload SCA report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: reports/
 
-          ATTEMPTS=120
-          SLEEP=3
-          ANALYSIS_ID=""
-          for i in $(seq 1 "$ATTEMPTS"); do
-            RESP=$(curl -sf -u "${SONAR_TOKEN}:" "https://sonarcloud.io/api/ce/task?id=${CE_TASK_ID}")
-            STATUS=$(echo "$RESP" | jq -r '.task.status')
-            if [ "$STATUS" = "SUCCESS" ]; then
-              ANALYSIS_ID=$(echo "$RESP" | jq -r '.task.analysisId')
-              break
-            fi
-            if [ "$STATUS" = "FAILED" ]; then
-              echo "Compute Engine FAILED"
-              exit 1
-            fi
-            sleep "$SLEEP"
-          done
+  image-security:
+    name: Image Security - Trivy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-          if [ -z "$ANALYSIS_ID" ]; then
-            echo "Timeout waiting CE"
-            exit 1
-          fi
+      - name: Build Docker image
+        run: docker build -t app:latest .
 
-          HTTP=$(curl -sS -u "${SONAR_TOKEN}:" -o qg.json -w '%{http_code}' "https://sonarcloud.io/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}")
-          echo "HTTP=$HTTP"
-          cat qg.json
+      - name: Trivy scan (generate SARIF)
+        id: trivy
+        uses: aquasecurity/trivy-action@master
+        continue-on-error: true
+        with:
+          image-ref: 'app:latest'
+          format: 'sarif'
+          output: 'trivy.sarif'
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '1'
 
-          if [ "$HTTP" != "200" ]; then
-            exit 1
-          fi
+      - name: Upload Trivy SARIF to Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
 
-          QG_STATUS=$(jq -r '.projectStatus.status' qg.json)
-          echo "QG=$QG_STATUS"
-          test "$QG_STATUS" != "ERROR"
+      - name: Upload Trivy artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: trivy.sarif
+
+      - name: Fail job if Trivy found vulnerabilities
+        if: steps.trivy.outcome == 'failure'
+        run: exit 1
