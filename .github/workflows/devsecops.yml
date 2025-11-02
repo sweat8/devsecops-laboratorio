@@ -1,50 +1,25 @@
-# Comentario (ES): Pipeline SonarCloud con debug de permisos y claves forzadas
-
 name: DevSecOps Pipeline - SonarCloud Focus
-
 on:
   push:
     branches:
-      - feature/devsecops-pipeline     # Comentario (ES): ejecuta en tu rama
-
+      - feature/devsecops-pipeline
 permissions:
   contents: read
-
 jobs:
   sonarcloud-sast:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0               # Comentario (ES): útil para blame/SCM
-
-      # (Opcional) Generar cobertura si usas Jest/LCOV
-      # - name: Install deps and test with coverage
-      #   run: |
-      #     npm ci
-      #     npm test -- --coverage --watch=false
-
-      # Debug: verifica que el token "ve" el proyecto y el endpoint de QG
-      - name: Debug SonarCloud project visibility
-        run: |
-          echo ">> Checking project access with SONAR_TOKEN..."
-          curl -s -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/projects/search?projects=sweat8_devsecops-laboratorio"
-          echo
-          echo ">> Checking quality gate endpoint with projectKey..."
-          curl -s -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/qualitygates/project_status?projectKey=sweat8_devsecops-laboratorio"
-          echo
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}  # Comentario (ES): token de usuario miembro de 'sweat8' con Browse
-
-      # Escaneo SonarCloud con acción oficial v6 (claves forzadas)
+          fetch-depth: 0
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}    # Comentario (ES): token con Execute + Browse
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
             -Dsonar.host.url=https://sonarcloud.io
             -Dsonar.organization=sweat8
             -Dsonar.projectKey=sweat8_devsecops-laboratorio
+            -Dsonar.qualitygate.wait=false
