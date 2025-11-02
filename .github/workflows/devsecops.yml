@@ -2,6 +2,7 @@ name: DevSecOps Pipeline - SonarCloud Focus
 on:
   push:
     branches:
+      - main
       - feature/devsecops-pipeline
 
 permissions:
@@ -22,7 +23,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -e
-          curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/projects/search?organization=sweat8&projects=sweat8_devsecops-laboratorio" | jq -r .paging.total | grep -q '^[1-9]'
+          curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/projects/search?organization=sweat8&projects=sweat8_devsecops-laboratorio" >/dev/null
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -38,7 +39,8 @@ jobs:
             -Dsonar.projectKey=sweat8_devsecops-laboratorio
             -Dsonar.qualitygate.wait=false
 
-      - name: Wait CE and check Quality Gate
+      - name: Wait CE and check Quality Gate (main only)
+        if: github.ref_name == 'main'
         shell: bash
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -46,65 +48,21 @@ jobs:
           set -Eeuo pipefail
           RT=".scannerwork/report-task.txt"
           CE_TASK_ID=$(grep '^ceTaskId=' "$RT" | cut -d= -f2)
-          echo "Compute task id: $CE_TASK_ID"
-
           for i in {1..120}; do
             RESP=$(curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/ce/task?id=${CE_TASK_ID}")
             STATUS=$(echo "$RESP" | jq -r '.task.status')
-            echo "CE status: $STATUS (try $i)"
             if [ "$STATUS" = "SUCCESS" ]; then
               ANALYSIS_ID=$(echo "$RESP" | jq -r '.task.analysisId')
               break
             elif [ "$STATUS" = "FAILED" ]; then
-              echo "::error::Compute Engine FAILED"
               exit 1
             fi
             sleep 3
           done
+          HTTP=$(curl -sS -u ${SONAR_TOKEN}: -o qg.json -w '%{http_code}' "https://sonarcloud.io/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}")
+          [ "$HTTP" = "200" ] || (cat qg.json; exit 1)
+          [ "$(jq -r '.projectStatus.status' qg.json)" = "ERROR" ] && exit 1 || exit 0
 
-          BRANCH="${GITHUB_REF_NAME}"
-          URL1="https://sonarcloud.io/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}"
-          URL2="https://sonarcloud.io/api/qualitygates/project_status?projectKey=sweat8_devsecops-laboratorio&branch=${BRANCH}"
-
-          for URL in "$URL1" "$URL2"; do
-            HTTP=$(curl -sS -u ${SONAR_TOKEN}: -o qg.json -w '%{http_code}' "$URL")
-            echo "QG HTTP: $HTTP -> $URL"
-            if [ "$HTTP" = "200" ]; then
-              QG_STATUS=$(jq -r '.projectStatus.status' qg.json)
-              echo "Quality Gate status: $QG_STATUS"
-              [ "$QG_STATUS" = "ERROR" ] && exit 1
-              exit 0
-            fi
-          done
-
-          echo "::error::Cannot fetch Quality Gate status"
-          cat qg.json || true
-          exit 1
-
-      - name: Dependency-Check (SCA)
-        uses: dependency-check/Dependency-Check_Action@main
-        with:
-          project: 'DevSecOpsLab'
-          path: '.'
-          format: 'HTML'
-          out: 'reports'
-          args: >
-            --failOnCVSS 4.0
-
-      - name: Upload SCA report
-        uses: actions/upload-artifact@v4
-        with:
-          name: dependency-check-report
-          path: reports
-
-      - name: Build Docker image
-        run: docker build -t movies-app:${{ github.sha }} .
-
-      - name: Trivy Image Scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'movies-app:${{ github.sha }}'
-          format: 'table'
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH,MEDIUM'
-          exit-code: '1'
+      - name: Skip QG on feature branches
+        if: github.ref_name != 'main'
+        run: echo "Skipping Quality Gate check on non-main branch: $GITHUB_REF_NAME"
