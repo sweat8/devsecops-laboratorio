@@ -22,9 +22,11 @@ jobs:
           set -e
           curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/projects/search?organization=sweat8&projects=sweat8_devsecops-laboratorio" | tee /tmp/p.json
           grep -q '"total":[1-9]' /tmp/p.json
-          curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/qualitygates/project_status?projectKey=sweat8_devsecops-laboratorio" | grep -q '"projectStatus"'
 
-      - name: SonarCloud Scan (SAST)
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: SonarCloud Scan (no wait)
         uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -33,7 +35,30 @@ jobs:
             -Dsonar.host.url=https://sonarcloud.io
             -Dsonar.organization=sweat8
             -Dsonar.projectKey=sweat8_devsecops-laboratorio
-            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.wait=false
+
+      - name: Wait CE and check Quality Gate
+        shell: bash
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          set -e
+          TASK_URL=$(grep -o 'ceTaskUrl=.*' .scannerwork/report-task.txt | cut -d= -f2)
+          CE_TASK_JSON=$(curl -s -u ${SONAR_TOKEN}: "$TASK_URL")
+          TASK_ID=$(echo "$CE_TASK_JSON" | jq -r '.task.id')
+          STATUS=$(echo "$CE_TASK_JSON" | jq -r '.task.status')
+          while [ "$STATUS" != "SUCCESS" ]; do
+            [ "$STATUS" = "FAILED" ] && echo "Compute Engine: FAILED" && exit 1
+            sleep 3
+            CE_TASK_JSON=$(curl -s -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/ce/task?id=$TASK_ID")
+            STATUS=$(echo "$CE_TASK_JSON" | jq -r '.task.status')
+          done
+          ANALYSIS_ID=$(echo "$CE_TASK_JSON" | jq -r '.task.analysisId')
+          QG_JSON=$(curl -s -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
+          echo "$QG_JSON" | tee qg.json
+          QG_STATUS=$(jq -r '.projectStatus.status' qg.json)
+          echo "Quality Gate status: $QG_STATUS"
+          [ "$QG_STATUS" = "ERROR" ] && exit 1
 
       - name: Dependency-Check (SCA)
         uses: dependency-check/Dependency-Check_Action@main
