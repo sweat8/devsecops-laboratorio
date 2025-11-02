@@ -14,7 +14,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ---------- SAST ----------
+      - name: Validate Sonar token access
+        shell: bash
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          set -e
+          curl -s -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/projects/search?projects=sweat8_devsecops-laboratorio" | tee /tmp/p.json
+          grep -q '"total":[1-9]' /tmp/p.json
+          curl -s -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/qualitygates/project_status?projectKey=sweat8_devsecops-laboratorio" | grep -q '"projectStatus"'
+
       - name: SonarCloud Scan (SAST)
         uses: SonarSource/sonarqube-scan-action@v6
         env:
@@ -26,7 +35,6 @@ jobs:
             -Dsonar.projectKey=sweat8_devsecops-laboratorio
             -Dsonar.qualitygate.wait=true
 
-      # ---------- SCA ----------
       - name: Dependency-Check (SCA)
         uses: dependency-check/Dependency-Check_Action@main
         with:
@@ -35,7 +43,7 @@ jobs:
           format: 'HTML'
           out: 'reports'
           args: >
-            --failOnCVSS 4.0  # ES: falla si existe vulnerabilidad CVSS >= 4.0 (MEDIUM)
+            --failOnCVSS 4.0
 
       - name: Upload SCA report
         uses: actions/upload-artifact@v4
@@ -43,11 +51,9 @@ jobs:
           name: dependency-check-report
           path: reports
 
-      # ---------- Build Docker ----------
       - name: Build Docker image
         run: docker build -t movies-app:${{ github.sha }} .
 
-      # ---------- Image Security (Trivy) ----------
       - name: Trivy Image Scan
         uses: aquasecurity/trivy-action@master
         with:
