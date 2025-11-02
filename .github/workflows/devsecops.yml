@@ -1,4 +1,5 @@
 name: DevSecOps Pipeline - SonarCloud Focus
+
 on:
   push:
     branches:
@@ -11,6 +12,7 @@ permissions:
 jobs:
   ci-security:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,12 +20,11 @@ jobs:
           fetch-depth: 0
 
       - name: Validate Sonar token access
-        shell: bash
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -e
-          curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/projects/search?organization=sweat8&projects=sweat8_devsecops-laboratorio" >/dev/null
+          curl -sf -u "${SONAR_TOKEN}:" "https://sonarcloud.io/api/projects/search?organization=sweat8&projects=sweat8_devsecops-laboratorio" >/dev/null
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -41,28 +42,48 @@ jobs:
 
       - name: Wait CE and check Quality Gate (main only)
         if: github.ref_name == 'main'
-        shell: bash
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -Eeuo pipefail
           RT=".scannerwork/report-task.txt"
+          if [ ! -f "$RT" ]; then
+            echo "report-task.txt not found"
+            exit 1
+          fi
+
           CE_TASK_ID=$(grep '^ceTaskId=' "$RT" | cut -d= -f2)
-          for i in {1..120}; do
-            RESP=$(curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/ce/task?id=${CE_TASK_ID}")
+
+          ATTEMPTS=120
+          SLEEP=3
+          ANALYSIS_ID=""
+          for i in $(seq 1 "$ATTEMPTS"); do
+            RESP=$(curl -sf -u "${SONAR_TOKEN}:" "https://sonarcloud.io/api/ce/task?id=${CE_TASK_ID}")
             STATUS=$(echo "$RESP" | jq -r '.task.status')
             if [ "$STATUS" = "SUCCESS" ]; then
               ANALYSIS_ID=$(echo "$RESP" | jq -r '.task.analysisId')
               break
-            elif [ "$STATUS" = "FAILED" ]; then
+            fi
+            if [ "$STATUS" = "FAILED" ]; then
+              echo "Compute Engine FAILED"
               exit 1
             fi
-            sleep 3
+            sleep "$SLEEP"
           done
-          HTTP=$(curl -sS -u ${SONAR_TOKEN}: -o qg.json -w '%{http_code}' "https://sonarcloud.io/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}")
-          [ "$HTTP" = "200" ] || (cat qg.json; exit 1)
-          [ "$(jq -r '.projectStatus.status' qg.json)" = "ERROR" ] && exit 1 || exit 0
 
-      - name: Skip QG on feature branches
-        if: github.ref_name != 'main'
-        run: echo "Skipping Quality Gate check on non-main branch: $GITHUB_REF_NAME"
+          if [ -z "$ANALYSIS_ID" ]; then
+            echo "Timeout waiting CE"
+            exit 1
+          fi
+
+          HTTP=$(curl -sS -u "${SONAR_TOKEN}:" -o qg.json -w '%{http_code}' "https://sonarcloud.io/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}")
+          echo "HTTP=$HTTP"
+          cat qg.json
+
+          if [ "$HTTP" != "200" ]; then
+            exit 1
+          fi
+
+          QG_STATUS=$(jq -r '.projectStatus.status' qg.json)
+          echo "QG=$QG_STATUS"
+          test "$QG_STATUS" != "ERROR"
