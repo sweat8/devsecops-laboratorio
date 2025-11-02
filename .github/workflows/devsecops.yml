@@ -20,9 +20,9 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -e
-          curl -s -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/projects/search?projects=sweat8_devsecops-laboratorio" | tee /tmp/p.json
+          curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/projects/search?organization=sweat8&projects=sweat8_devsecops-laboratorio" | tee /tmp/p.json
           grep -q '"total":[1-9]' /tmp/p.json
-          curl -s -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/qualitygates/project_status?projectKey=sweat8_devsecops-laboratorio" | grep -q '"projectStatus"'
+          curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/qualitygates/project_status?projectKey=sweat8_devsecops-laboratorio" | grep -q '"projectStatus"'
 
       - name: SonarCloud Scan (SAST)
         uses: SonarSource/sonarqube-scan-action@v6
