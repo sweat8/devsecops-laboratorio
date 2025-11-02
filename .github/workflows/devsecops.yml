@@ -3,8 +3,10 @@ on:
   push:
     branches:
       - feature/devsecops-pipeline
+
 permissions:
   contents: read
+
 jobs:
   ci-security:
     runs-on: ubuntu-latest
@@ -42,19 +44,33 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          set -e
-          TASK_URL=$(grep -o 'ceTaskUrl=.*' .scannerwork/report-task.txt | cut -d= -f2)
-          CE_TASK_JSON=$(curl -s -u ${SONAR_TOKEN}: "$TASK_URL")
-          TASK_ID=$(echo "$CE_TASK_JSON" | jq -r '.task.id')
-          STATUS=$(echo "$CE_TASK_JSON" | jq -r '.task.status')
-          while [ "$STATUS" != "SUCCESS" ]; do
-            [ "$STATUS" = "FAILED" ] && echo "Compute Engine: FAILED" && exit 1
+          set -Eeuo pipefail
+          RT=".scannerwork/report-task.txt"
+          grep -q '^ceTaskId=' "$RT"
+          CE_TASK_ID=$(grep '^ceTaskId=' "$RT" | cut -d= -f2)
+          echo "Compute task id: $CE_TASK_ID"
+
+          ANALYSIS_ID=""
+          for i in {1..120}; do
+            RESP=$(curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/ce/task?id=${CE_TASK_ID}")
+            STATUS=$(echo "$RESP" | jq -r '.task.status')
+            echo "CE status: $STATUS (try $i)"
+            if [ "$STATUS" = "SUCCESS" ]; then
+              ANALYSIS_ID=$(echo "$RESP" | jq -r '.task.analysisId')
+              break
+            elif [ "$STATUS" = "FAILED" ]; then
+              echo "::error::Compute Engine FAILED"
+              exit 1
+            fi
             sleep 3
-            CE_TASK_JSON=$(curl -s -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/ce/task?id=$TASK_ID")
-            STATUS=$(echo "$CE_TASK_JSON" | jq -r '.task.status')
           done
-          ANALYSIS_ID=$(echo "$CE_TASK_JSON" | jq -r '.task.analysisId')
-          QG_JSON=$(curl -s -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
+
+          if [ -z "${ANALYSIS_ID:-}" ] || [ "$ANALYSIS_ID" = "null" ]; then
+            echo "::error::Timeout waiting CE task"
+            exit 1
+          fi
+
+          QG_JSON=$(curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}")
           echo "$QG_JSON" | tee qg.json
           QG_STATUS=$(jq -r '.projectStatus.status' qg.json)
           echo "Quality Gate status: $QG_STATUS"
