@@ -22,8 +22,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -e
-          curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/projects/search?organization=sweat8&projects=sweat8_devsecops-laboratorio" | tee /tmp/p.json
-          grep -q '"total":[1-9]' /tmp/p.json
+          curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/projects/search?organization=sweat8&projects=sweat8_devsecops-laboratorio" | jq -r .paging.total | grep -q '^[1-9]'
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -46,11 +45,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           RT=".scannerwork/report-task.txt"
-          grep -q '^ceTaskId=' "$RT"
           CE_TASK_ID=$(grep '^ceTaskId=' "$RT" | cut -d= -f2)
           echo "Compute task id: $CE_TASK_ID"
 
-          ANALYSIS_ID=""
           for i in {1..120}; do
             RESP=$(curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/ce/task?id=${CE_TASK_ID}")
             STATUS=$(echo "$RESP" | jq -r '.task.status')
@@ -65,16 +62,24 @@ jobs:
             sleep 3
           done
 
-          if [ -z "${ANALYSIS_ID:-}" ] || [ "$ANALYSIS_ID" = "null" ]; then
-            echo "::error::Timeout waiting CE task"
-            exit 1
-          fi
+          BRANCH="${GITHUB_REF_NAME}"
+          URL1="https://sonarcloud.io/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}"
+          URL2="https://sonarcloud.io/api/qualitygates/project_status?projectKey=sweat8_devsecops-laboratorio&branch=${BRANCH}"
 
-          QG_JSON=$(curl -sf -u ${SONAR_TOKEN}: "https://sonarcloud.io/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}")
-          echo "$QG_JSON" | tee qg.json
-          QG_STATUS=$(jq -r '.projectStatus.status' qg.json)
-          echo "Quality Gate status: $QG_STATUS"
-          [ "$QG_STATUS" = "ERROR" ] && exit 1
+          for URL in "$URL1" "$URL2"; do
+            HTTP=$(curl -sS -u ${SONAR_TOKEN}: -o qg.json -w '%{http_code}' "$URL")
+            echo "QG HTTP: $HTTP -> $URL"
+            if [ "$HTTP" = "200" ]; then
+              QG_STATUS=$(jq -r '.projectStatus.status' qg.json)
+              echo "Quality Gate status: $QG_STATUS"
+              [ "$QG_STATUS" = "ERROR" ] && exit 1
+              exit 0
+            fi
+          done
+
+          echo "::error::Cannot fetch Quality Gate status"
+          cat qg.json || true
+          exit 1
 
       - name: Dependency-Check (SCA)
         uses: dependency-check/Dependency-Check_Action@main
